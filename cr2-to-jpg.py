@@ -1,87 +1,90 @@
 #!/usr/bin/env python3
 
 # import what we need
-import argparse
-import numpy
-import os
-import glob
-import time
-import rawpy
-from alive_progress import alive_bar
+from argparse import ArgumentParser
+from rawpy import imread
+
+from tqdm import tqdm
 from PIL import Image
+
+from os import getcwd, walk, utime, mkdir
+from os.path import join, splitext, getmtime, basename, exists
+
 # params
-parser = argparse.ArgumentParser(description='Convert CR2 to JPG')
-parser.add_argument('-s', '--source', help='Source folder of CR2 files', required=True)
-parser.add_argument('-d', '--destination', help='Destination folder for converted JPG files', required=True)
-parser.add_argument('--recursive', help='Load files recursively from subdirs of Source Folder', required=False, default=False)
+parser = ArgumentParser(description='Convert CR2 to JPG')
+parser.add_argument('--recursive', help='Load files recursively from subdirs of Source Folder', required=False, default=False, type=bool)
+parser.add_argument('--use-camera-wb', help='Use camera white balance', required=False, default=True, type=bool)
 args = parser.parse_args()
 
-# dirs and files
-raw_file_type = ".cr2"
-raw_dir = args.source + '/'
+def get_raw_images(raw_dir, raw_file_types, recursive=False):
+    raw_files = []
+    for root, dirs, files in walk(raw_dir):
+        # find raw files
+        for file in files:
+            # ### probably not the best
+            for raw_file_type in raw_file_types:
+                if file.endswith(raw_file_type):
+                    raw_files.append(join(root, file))
+                    break
 
-# sanity check
-if not os.path.exists(args.destination):
-    print("Destination directory does not exist\nExiting")
-    exit(1)
+        # if recursive find in subfolders
+        if recursive:
+            for dir in dirs:
+                subfolder_raw_files = get_raw_images(join(root, dir), raw_file_types, recursive)
+                raw_files.extend(subfolder_raw_files)
 
-if not os.path.isdir(args.destination):
-    print("Destination is not a directory\nExiting")
-    exit(1)
-
-converted_dir = args.destination + '/'
-
-# load images recursively if required
-if args.recursive:
-    raw_images = glob.glob(raw_dir + '/*/*' + raw_file_type)
-else:
-    raw_images = glob.glob(raw_dir + '*' + raw_file_type)
-
-# exit if no image found in source
-if len(raw_images) == 0:
-    print("Nothing to do...\nExiting")
-    exit(1)
+    return raw_files
 
 
 # converter function which iterates through list of files
-def convert_cr2_to_jpg(raw_images):
-    print(f"Number of files to convert: {len(raw_images)}")
-    with alive_bar(len(raw_images)) as bar:
-        for raw_image in raw_images:
-            #print(f"Converting the following raw image: {raw_image} to JPG")
+def convert_cr2_to_jpg(raw_images, converted_dir, use_camera_wb=True):
+    
+    # exit if no image found in source
+    if len(raw_images) == 0:
+        print("No raw images found...\nExiting")
+        exit(1)
+        
+    # create converted dir if it doesn't exist
+    if not exists(converted_dir):
+        mkdir(converted_dir)
 
-            # file vars
-            file_name = os.path.basename(raw_image)
-            file_without_ext = os.path.splitext(file_name)[0]
-            file_timestamp = os.path.getmtime(raw_image)
+    tq = tqdm(raw_images)
+    for raw_image in tq:
+        tq.set_description_str(f"Converting the following raw image: {raw_image} to JPG")
 
-            # parse CR2 image
-            raw_image_process = rawpy.imread(raw_image)
-            print(raw_image_process)
-            exit()
-            #buffered_image = numpy.array(raw_image_process.to_buffer())
+        # file vars
+        file_name = basename(raw_image)
+        file_without_ext = splitext(file_name)[0]
+        file_timestamp = getmtime(raw_image)
 
-            # check orientation due to PIL image stretch issue
-            if raw_image_process.metadata.orientation == 0:
-                jpg_image_height = raw_image_process.metadata.height
-                jpg_image_width = raw_image_process.metadata.width
-            else:
-                jpg_image_height = raw_image_process.metadata.width
-                jpg_image_width = raw_image_process.metadata.height
+        # parse CR2 image
+        with imread(raw_image) as raw_image_process:
+            # Postprocess
+            rgb = raw_image_process.postprocess(use_camera_wb=use_camera_wb)
 
-            # prep JPG details
-            jpg_image_location = converted_dir + file_without_ext + '.jpg'
-            jpg_image = Image.frombytes('RGB', (jpg_image_width, jpg_image_height), buffered_image)
-            jpg_image.save(jpg_image_location, format="jpeg")
+            # Save image
+            with Image.fromarray(rgb) as jpg_image:
+                jpg_image_location = converted_dir + file_without_ext + '.jpg'
+                jpg_image.save(jpg_image_location, format="jpeg", optimize=True)
 
-            # update JPG file timestamp to match CR2
-            os.utime(jpg_image_location, (file_timestamp,file_timestamp))
+                # update JPG file timestamp to match CR2
+                utime(jpg_image_location, (file_timestamp,file_timestamp))
 
-            # close to prevent too many open files error
-            jpg_image.close()
-            raw_image_process.close()
-            bar()
 
 # call function
 if __name__ == "__main__":
-    convert_cr2_to_jpg(raw_images)
+
+    # dirs and files
+    raw_file_types = [".cr2",".CR2"]
+    raw_dir = getcwd()
+
+    # get raw images
+    print("Recursive mode:",args.recursive)
+    raw_images = get_raw_images(raw_dir, raw_file_types, args.recursive)
+
+    # set converted dir
+    converted_dir = join(raw_dir, 'converted/')
+    
+    use_camera_wb = args.use_camera_wb
+    print("Use camera white balance:",use_camera_wb)
+    convert_cr2_to_jpg(raw_images, converted_dir, use_camera_wb)
