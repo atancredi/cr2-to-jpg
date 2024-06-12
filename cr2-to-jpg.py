@@ -12,8 +12,8 @@ from os.path import join, splitext, getmtime, basename, exists
 
 # params
 parser = ArgumentParser(description='Convert CR2 to JPG')
-parser.add_argument('--recursive', help='Load files recursively from subdirs of Source Folder', required=False, default=False, type=bool)
-parser.add_argument('--use-camera-wb', help='Use camera white balance', required=False, default=True, type=bool)
+parser.add_argument('--recursive', help='Load files recursively from subdirs of Source Folder', required=False)
+parser.add_argument('--use-camera-wb', help='Use camera white balance', required=False)
 args = parser.parse_args()
 
 def get_raw_images(raw_dir, raw_file_types, recursive=False):
@@ -70,21 +70,48 @@ def convert_cr2_to_jpg(raw_images, converted_dir, use_camera_wb=True):
                 # update JPG file timestamp to match CR2
                 utime(jpg_image_location, (file_timestamp,file_timestamp))
 
+def parse_bool(arg, default=None):
+    if isinstance(arg, bool):
+        return arg
+    arg = str(arg)
+    if arg.lower() in ['true', 'yes', 't', 'y', '1']:
+        return True
+    elif arg.lower() in ['false', 'no', 'f', 'n', '0']:
+        return False
+    return default
+
+def get_converted_dir(raw_dir):
+    d = join(raw_dir, 'converted/')
+    if exists(d):
+        raise FileExistsError(f"Path '{d}' already exists. Exiting")
+    return d
 
 # call function
 if __name__ == "__main__":
+
+    print("CR2 to JPG - Alessandro Tancredi 2024")
+
+    # parse args
+    use_camera_wb = parse_bool(args.use_camera_wb, True)
+    recursive = parse_bool(args.recursive, False)
+    print("\tRecursive mode:",recursive)
+    print("\tUse camera white balance:",use_camera_wb)
+    print("\n")
 
     # dirs and files
     raw_file_types = [".cr2",".CR2"]
     raw_dir = getcwd()
 
     # get raw images
-    print("Recursive mode:",args.recursive)
-    raw_images = get_raw_images(raw_dir, raw_file_types, args.recursive)
+    raw_images = get_raw_images(raw_dir, raw_file_types, recursive)
 
-    # set converted dir
-    converted_dir = join(raw_dir, 'converted/')
-    
-    use_camera_wb = args.use_camera_wb
-    print("Use camera white balance:",use_camera_wb)
-    convert_cr2_to_jpg(raw_images, converted_dir, use_camera_wb)
+    try:
+        # set converted dir
+        converted_dir = get_converted_dir(raw_dir)
+
+        # execute conversione    
+        convert_cr2_to_jpg(raw_images, converted_dir, use_camera_wb)
+    except FileExistsError as e:
+        print(e)
+    except KeyboardInterrupt:
+        print("\nExiting...")
